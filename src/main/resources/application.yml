@@ -1,0 +1,46 @@
+spring:
+  application:
+    name: api-financas-pessoais
+
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/financas}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
+
+  jpa:
+    # Schema é responsabilidade do Flyway; Hibernate só valida o mapeamento
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  autoconfigure:
+    # Autenticação é feita pelo JwtAuthenticationFilter; sem isso o Boot cria
+    # um usuário em memória com senha gerada no log.
+    exclude: org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration
+
+server:
+  port: ${SERVER_PORT:8080}
+  error:
+    include-stacktrace: never
+
+# Segredo Base64 com no mínimo 256 bits. O valor padrão abaixo é SÓ para dev:
+# está versionado no git, então qualquer outro ambiente DEVE definir JWT_SECRET.
+# Gere um novo com: openssl rand -base64 64
+security:
+  jwt:
+    secret: ${JWT_SECRET:WGkP/L4rQfrTcWjkoj2oldCl3++dRXM6zQARfDUgBYNAR+UxOZoCvKiDNuYXDfurb/RWsVSxgvQGVlL4AA5nRA==}
+    expiration: ${JWT_EXPIRATION:PT2H}
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
