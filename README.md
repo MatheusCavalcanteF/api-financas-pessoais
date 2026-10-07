@@ -129,7 +129,26 @@ Regras da importação:
   - Datas em ISO (`2026-10-01`), valores sempre positivos e `type` igual a `INCOME` ou `EXPENSE`.
 - **Arquivo inválido.** Qualquer linha inválida rejeita o arquivo inteiro com 400. A resposta lista os erros por linha.
 - **Deduplicação.** No OFX, usa o `FITID` do banco junto com a conta. No CSV e no OFX sem `FITID`, usa data + valor + tipo + descrição. Os dois critérios não se cruzam: o mesmo lançamento importado por OFX e depois por CSV aparece duas vezes. Escolha um formato por conta.
-- **Categoria.** Transações importadas chegam sem categoria.
+- **Categoria.** Vem das regras do usuário (veja abaixo). Sem regra que case, a transação fica sem categoria.
+
+#### Categorização automática
+
+Crie regras de palavra-chave antes de importar. Toda transação nova cuja descrição contenha a keyword recebe a categoria da regra:
+
+```bash
+CATEGORY_ID=$(curl -s -X POST http://localhost:8080/categories \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"name": "Alimentação"}' | sed -E 's/.*"id":"([^"]+)".*/\1/')
+
+curl -s -X POST http://localhost:8080/category-rules \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d "{\"keyword\": \"café\", \"categoryId\": \"$CATEGORY_ID\"}"
+```
+
+- **Comparação.** Ignora maiúsculas, acentos e espaços extras: a keyword `café` casa com `CAFE DA PRAÇA`. A keyword precisa ter no mínimo 3 caracteres.
+- **Várias regras casando.** Vence a keyword mais longa: `uber eats` ganha de `uber`.
+- **Alcance.** As regras só valem para transações novas. Criar uma regra não reclassifica o que já foi importado, e uma duplicata ignorada mantém a categoria que já tinha.
+- **Rotas.** O CRUD completo fica em `/category-rules`, com listagem paginada. Cada usuário pode ter até 500 regras.
 
 ### 3. Dashboard (relatório mensal)
 
@@ -165,7 +184,7 @@ Os pacotes são organizados por domínio, em `src/main/java/com/finance/api`:
 | `auth` | Registro e login |
 | `security` | Filtro JWT e configuração do Spring Security |
 | `user` | Entidade de usuário |
-| `category` | CRUD de categorias |
+| `category` | CRUD de categorias e regras de categorização automática (`category.rule`) |
 | `transaction` | CRUD, listagem paginada e importação CSV/OFX |
 | `report` | Relatório mensal |
 | `shared` | Tratamento de erros (`ProblemDetail`) e validações |

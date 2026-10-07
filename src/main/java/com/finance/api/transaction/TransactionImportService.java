@@ -14,10 +14,14 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.finance.api.category.rule.CategoryMatcher;
+import com.finance.api.category.rule.CategoryRuleService;
+import com.finance.api.shared.exception.ConflictException;
 import com.finance.api.transaction.dto.ImportSummaryResponse;
 
 /**
@@ -47,45 +51,63 @@ public class TransactionImportService {
 	// Suficiente para cabeçalho OFX 1.x ou declaração XML do OFX 2.x
 	private static final int SNIFF_BYTES = 1024;
 
-	// created_at fica com o DEFAULT now(); category_id fica nulo (o usuário classifica depois)
+	// created_at fica com o DEFAULT now(); category_id vem das regras do usuário, ou nulo
 	private static final String INSERT_IGNORING_DUPLICATES = """
-			INSERT INTO transactions (id, user_id, amount, transaction_date, description, type, unique_hash, fitid)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			INSERT INTO transactions
+			    (id, user_id, amount, transaction_date, description, type, unique_hash, fitid, category_id)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (user_id, unique_hash) DO NOTHING
 			""";
 
 	private final CsvTransactionParser csvParser;
 	private final OfxTransactionParser ofxParser;
+	private final CategoryRuleService ruleService;
 	private final JdbcTemplate jdbcTemplate;
 
 	public TransactionImportService(CsvTransactionParser csvParser, OfxTransactionParser ofxParser,
-			JdbcTemplate jdbcTemplate) {
+			CategoryRuleService ruleService, JdbcTemplate jdbcTemplate) {
 		this.csvParser = csvParser;
 		this.ofxParser = ofxParser;
+		this.ruleService = ruleService;
 		this.jdbcTemplate = jdbcTemplate;
 	}
 
 	/**
 	 * O formato é detectado pelo conteúdo, não pelo nome nem pelo Content-Type do
 	 * upload, que o cliente controla e que bancos/navegadores preenchem de forma variada.
+	 * <p>
+	 * As regras de categorização valem só para transações novas: uma duplicata
+	 * ignorada mantém a categoria que já tem, e criar uma regra não reclassifica
+	 * o que já foi importado.
 	 */
 	@Transactional
 	public ImportSummaryResponse importFile(InputStream file, UUID userId) {
 		BufferedInputStream input = new BufferedInputStream(file);
 		List<ParsedTransaction> rows = isOfx(input) ? ofxParser.parse(input) : csvParser.parse(input);
 		List<HashedRow> hashedRows = assignHashes(rows);
+		// Uma query para todas as regras, depois do parse: arquivo inválido nem chega aqui
+		CategoryMatcher matcher = ruleService.matcherFor(userId);
 
 		int imported = 0;
-		int[][] results = jdbcTemplate.batchUpdate(INSERT_IGNORING_DUPLICATES, hashedRows, BATCH_SIZE, (ps, r) -> {
-			ps.setObject(1, UUID.randomUUID());
-			ps.setObject(2, userId);
-			ps.setBigDecimal(3, r.row().amount());
-			ps.setObject(4, r.row().date());
-			ps.setString(5, r.row().description());
-			ps.setString(6, r.row().type().name());
-			ps.setString(7, r.hash());
-			ps.setString(8, r.fitId());
-		});
+		int[][] results;
+		try {
+			results = jdbcTemplate.batchUpdate(INSERT_IGNORING_DUPLICATES, hashedRows, BATCH_SIZE, (ps, r) -> {
+				ps.setObject(1, UUID.randomUUID());
+				ps.setObject(2, userId);
+				ps.setBigDecimal(3, r.row().amount());
+				ps.setObject(4, r.row().date());
+				ps.setString(5, r.row().description());
+				ps.setString(6, r.row().type().name());
+				ps.setString(7, r.hash());
+				ps.setString(8, r.fitId());
+				ps.setObject(9, matcher.categoryFor(r.row().description()));
+			});
+		}
+		catch (DataIntegrityViolationException ex) {
+			// Duplicata não cai aqui (ON CONFLICT); só a FK, se uma categoria das
+			// regras foi apagada durante a importação. Nada foi gravado.
+			throw new ConflictException("Uma categoria foi removida durante a importação. Tente novamente.");
+		}
 		for (int[] batch : results) {
 			for (int affected : batch) {
 				if (affected == Statement.SUCCESS_NO_INFO) {

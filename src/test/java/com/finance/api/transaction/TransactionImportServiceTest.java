@@ -13,7 +13,10 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,6 +31,10 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.finance.api.TestcontainersConfiguration;
+import com.finance.api.category.CategoryService;
+import com.finance.api.category.dto.CategoryRequest;
+import com.finance.api.category.rule.CategoryRuleService;
+import com.finance.api.category.rule.dto.CategoryRuleRequest;
 import com.finance.api.security.JwtService;
 import com.finance.api.transaction.dto.ImportSummaryResponse;
 import com.finance.api.transaction.dto.TransactionRequest;
@@ -60,6 +67,12 @@ class TransactionImportServiceTest {
 
 	@Autowired
 	private JdbcTemplate jdbcTemplate;
+
+	@Autowired
+	private CategoryService categoryService;
+
+	@Autowired
+	private CategoryRuleService ruleService;
 
 	private User user;
 
@@ -292,6 +305,67 @@ class TransactionImportServiceTest {
 			.andExpect(jsonPath("$.imported").value(1));
 
 		assertThat(descriptionsOf(user)).containsExactly("Farmácia");
+	}
+
+	@Test
+	void appliesTheUsersRulesWithLongestKeywordWinning() {
+		UUID transport = category("Transporte");
+		UUID delivery = category("Delivery");
+		UUID groceries = category("Mercado");
+		rule("uber", transport);
+		rule("Uber Eats", delivery);
+		rule("mercado", groceries);
+
+		importCsv(HEADER + """
+				2026-10-01,25.00,UBER *VIAGEM,EXPENSE
+				2026-10-01,48.90,UBER EATS *PEDIDO,EXPENSE
+				2026-10-02,312.40,SUPERMERCADO EXTRA,EXPENSE
+				2026-10-02,200.00,Posto Shell,EXPENSE
+				""");
+		importOfx("<STMTTRN><DTPOSTED>20261003<TRNAMT>-80.00<FITID>1<MEMO>MERCADO SAO JOAO</STMTTRN>\n");
+
+		assertThat(categoriesByDescription(user)).containsOnly(
+				Map.entry("UBER *VIAGEM", Optional.of(transport)),
+				Map.entry("UBER EATS *PEDIDO", Optional.of(delivery)),
+				Map.entry("SUPERMERCADO EXTRA", Optional.of(groceries)),
+				Map.entry("Posto Shell", Optional.empty()),
+				Map.entry("MERCADO SAO JOAO", Optional.of(groceries)));
+	}
+
+	@Test
+	void anotherUsersRulesAreNeverApplied() {
+		User other = newUser();
+		UUID otherCategory = categoryService.create(new CategoryRequest("Transporte"), other.getId()).id();
+		ruleService.create(new CategoryRuleRequest("uber", otherCategory), other.getId());
+
+		importCsv(HEADER + "2026-10-01,25.00,UBER *VIAGEM,EXPENSE\n");
+
+		assertThat(categoriesByDescription(user)).containsOnly(Map.entry("UBER *VIAGEM", Optional.empty()));
+	}
+
+	@Test
+	void rulesOnlyCategorizeNewTransactions() {
+		String csv = HEADER + "2026-10-01,25.00,UBER *VIAGEM,EXPENSE\n";
+		importCsv(csv);
+		rule("uber", category("Transporte"));
+
+		// A duplicata é ignorada e continua como estava: a regra nova não reclassifica
+		assertThat(importCsv(csv)).isEqualTo(new ImportSummaryResponse(1, 0, 1));
+		assertThat(categoriesByDescription(user)).containsOnly(Map.entry("UBER *VIAGEM", Optional.empty()));
+	}
+
+	private UUID category(String name) {
+		return categoryService.create(new CategoryRequest(name), user.getId()).id();
+	}
+
+	private void rule(String keyword, UUID categoryId) {
+		ruleService.create(new CategoryRuleRequest(keyword, categoryId), user.getId());
+	}
+
+	private Map<String, Optional<UUID>> categoriesByDescription(User owner) {
+		return transactionService.list(owner.getId(), Pageable.unpaged())
+			.stream()
+			.collect(Collectors.toMap(TransactionResponse::description, t -> Optional.ofNullable(t.categoryId())));
 	}
 
 	private ImportSummaryResponse importOfx(String transactions) {
