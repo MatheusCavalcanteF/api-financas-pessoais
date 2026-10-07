@@ -15,10 +15,12 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.FieldError;
+import org.springframework.validation.method.ParameterValidationResult;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
 import com.finance.api.auth.EmailAlreadyInUseException;
@@ -44,6 +46,26 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 		ProblemDetail problem = ex.getBody();
 		problem.setTitle("Dados inválidos");
 		problem.setDetail("Um ou mais campos são inválidos");
+		problem.setProperty("errors", errors);
+		return handleExceptionInternal(ex, problem, headers, status, request);
+	}
+
+	// Constraints em @RequestParam/@PathVariable (ex.: ?month=13), no mesmo formato do body inválido
+	@Override
+	protected ResponseEntity<Object> handleHandlerMethodValidationException(HandlerMethodValidationException ex,
+			HttpHeaders headers, HttpStatusCode status, WebRequest request) {
+		Map<String, String> errors = new LinkedHashMap<>();
+		for (ParameterValidationResult result : ex.getParameterValidationResults()) {
+			String parameter = result.getMethodParameter().getParameterName();
+			result.getResolvableErrors()
+				.stream()
+				.findFirst()
+				.ifPresent(error -> errors.putIfAbsent(parameter, error.getDefaultMessage()));
+		}
+
+		ProblemDetail problem = ex.getBody();
+		problem.setTitle("Dados inválidos");
+		problem.setDetail("Um ou mais parâmetros são inválidos");
 		problem.setProperty("errors", errors);
 		return handleExceptionInternal(ex, problem, headers, status, request);
 	}
