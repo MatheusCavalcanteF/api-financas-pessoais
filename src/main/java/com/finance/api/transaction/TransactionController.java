@@ -1,5 +1,7 @@
 package com.finance.api.transaction;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.UUID;
 
 import org.springframework.data.domain.Page;
@@ -7,6 +9,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -15,10 +18,13 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import com.finance.api.security.AuthenticatedUser;
+import com.finance.api.transaction.dto.ImportSummaryResponse;
 import com.finance.api.transaction.dto.TransactionRequest;
 import com.finance.api.transaction.dto.TransactionResponse;
 
@@ -30,9 +36,12 @@ import jakarta.validation.Valid;
 public class TransactionController {
 
 	private final TransactionService transactionService;
+	private final TransactionImportService transactionImportService;
 
-	public TransactionController(TransactionService transactionService) {
+	public TransactionController(TransactionService transactionService,
+			TransactionImportService transactionImportService) {
 		this.transactionService = transactionService;
+		this.transactionImportService = transactionImportService;
 	}
 
 	@GetMapping
@@ -53,6 +62,18 @@ public class TransactionController {
 	public TransactionResponse create(@Valid @RequestBody TransactionRequest request,
 			@Parameter(hidden = true) @AuthenticationPrincipal AuthenticatedUser user) {
 		return transactionService.create(request, user.id());
+	}
+
+	/**
+	 * Importa um CSV com cabeçalho {@code date,amount,description,type}. Linhas já
+	 * importadas são ignoradas; qualquer linha inválida rejeita o arquivo inteiro.
+	 */
+	@PostMapping(path = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+	public ImportSummaryResponse importCsv(@RequestParam("file") MultipartFile file,
+			@Parameter(hidden = true) @AuthenticationPrincipal AuthenticatedUser user) throws IOException {
+		try (InputStream csv = file.getInputStream()) {
+			return transactionImportService.importCsv(csv, user.id());
+		}
 	}
 
 	@PutMapping("/{id}")

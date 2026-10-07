@@ -19,6 +19,7 @@
 		<java.version>25</java.version>
 		<jjwt.version>0.13.0</jjwt.version>
 		<springdoc.version>3.1.1</springdoc.version>
+		<commons-csv.version>1.14.1</commons-csv.version>
 	</properties>
 
 	<dependencies>
@@ -77,6 +78,13 @@
 			<artifactId>jjwt-jackson</artifactId>
 			<version>${jjwt.version}</version>
 			<scope>runtime</scope>
+		</dependency>
+
+		<!-- Importação -->
+		<dependency>
+			<groupId>org.apache.commons</groupId>
+			<artifactId>commons-csv</artifactId>
+			<version>${commons-csv.version}</version>
 		</dependency>
 
 		<!-- Testes -->

@@ -22,6 +22,7 @@ import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
 import com.finance.api.auth.EmailAlreadyInUseException;
+import com.finance.api.transaction.InvalidImportFileException;
 
 /**
  * Padroniza todas as respostas de erro como ProblemDetail (RFC 7807).
@@ -60,6 +61,13 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 	@ExceptionHandler(ConflictException.class)
 	ProblemDetail handleConflict(ConflictException ex) {
 		return problem(HttpStatus.CONFLICT, "Conflito", ex.getMessage());
+	}
+
+	@ExceptionHandler(InvalidImportFileException.class)
+	ProblemDetail handleInvalidImportFile(InvalidImportFileException ex) {
+		ProblemDetail problem = problem(HttpStatus.BAD_REQUEST, "Arquivo inválido", ex.getMessage());
+		problem.setProperty("errors", ex.getErrors());
+		return problem;
 	}
 
 	// ?sort= com propriedade inexistente; sem isso viraria 500

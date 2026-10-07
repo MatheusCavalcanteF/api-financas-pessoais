@@ -17,6 +17,12 @@ spring:
         jdbc:
           time_zone: UTC
 
+  servlet:
+    multipart:
+      # Importação de extratos (POST /transactions/import)
+      max-file-size: 5MB
+      max-request-size: 5MB
+
   data:
     web:
       pageable:
