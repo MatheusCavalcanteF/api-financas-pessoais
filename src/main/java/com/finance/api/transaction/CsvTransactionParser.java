@@ -6,7 +6,6 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.UncheckedIOException;
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
@@ -24,6 +23,12 @@ import org.springframework.stereotype.Component;
 /**
  * Lê o CSV de importação ({@code date,amount,description,type}, em qualquer
  * ordem) e valida todas as linhas antes de qualquer gravação.
+ * <p>
+ * O separador é detectado pelo cabeçalho e define o formato dos valores:
+ * <ul>
+ * <li>{@code ;} → formato brasileiro, vírgula decimal ({@code 1.500,50})</li>
+ * <li>{@code ,} → ponto decimal ({@code 1500.50})</li>
+ * </ul>
  */
 @Component
 class CsvTransactionParser {
@@ -33,47 +38,43 @@ class CsvTransactionParser {
 	// Evita uma resposta gigante para um arquivo inteiro no formato errado
 	private static final int MAX_REPORTED_ERRORS = 20;
 
+	// Cabeçalho legítimo tem poucas dezenas de caracteres
+	private static final int HEADER_PEEK_LIMIT = 8 * 1024;
+
 	private static final String DATE = "date";
 	private static final String AMOUNT = "amount";
 	private static final String DESCRIPTION = "description";
 	private static final String TYPE = "type";
 	private static final List<String> REQUIRED_COLUMNS = List.of(DATE, AMOUNT, DESCRIPTION, TYPE);
 
-	private static final int MAX_INTEGER_DIGITS = 17; // NUMERIC(19,2)
 	private static final int MAX_DESCRIPTION_LENGTH = 255;
 
-	private static final CSVFormat FORMAT = CSVFormat.DEFAULT.builder()
-		.setHeader()
-		.setSkipHeaderRecord(true)
-		.setIgnoreHeaderCase(true)
-		.setIgnoreEmptyLines(true)
-		.setTrim(true)
-		.get();
-
-	record Row(int line, LocalDate date, BigDecimal amount, String description, TransactionType type) {
-	}
-
-	List<Row> parse(InputStream input) {
-		List<Row> rows = new ArrayList<>();
+	List<ParsedTransaction> parse(InputStream input) {
+		List<ParsedTransaction> rows = new ArrayList<>();
 		List<String> errors = new ArrayList<>();
 
-		try (CSVParser parser = FORMAT.parse(utf8Reader(input))) {
-			validateHeader(parser.getHeaderNames());
+		try (BufferedReader reader = utf8Reader(input)) {
+			char delimiter = detectDelimiter(reader);
+			char decimalSeparator = delimiter == ';' ? AmountParser.COMMA : AmountParser.DOT;
 
-			int line = 1; // cabeçalho
-			for (CSVRecord record : parser) {
-				line++;
-				if (rows.size() + errors.size() >= MAX_ROWS) {
-					throw new InvalidImportFileException("O arquivo excede o limite de " + MAX_ROWS + " linhas");
-				}
-				try {
-					rows.add(parseRecord(record, line));
-				}
-				catch (InvalidRowException ex) {
-					errors.add("Linha " + line + ": " + ex.getMessage());
-					if (errors.size() == MAX_REPORTED_ERRORS) {
-						errors.add("Muitos erros; a verificação foi interrompida");
-						break;
+			try (CSVParser parser = format(delimiter).parse(reader)) {
+				validateHeader(parser.getHeaderNames());
+
+				int line = 1; // cabeçalho
+				for (CSVRecord record : parser) {
+					line++;
+					if (rows.size() + errors.size() >= MAX_ROWS) {
+						throw new InvalidImportFileException("O arquivo excede o limite de " + MAX_ROWS + " linhas");
+					}
+					try {
+						rows.add(parseRecord(record, decimalSeparator));
+					}
+					catch (InvalidRowException ex) {
+						errors.add("Linha " + line + ": " + ex.getMessage());
+						if (errors.size() == MAX_REPORTED_ERRORS) {
+							errors.add("Muitos erros; a verificação foi interrompida");
+							break;
+						}
 					}
 				}
 			}
@@ -98,6 +99,33 @@ class CsvTransactionParser {
 		return rows;
 	}
 
+	/**
+	 * Decide pelo cabeçalho, que só tem nomes de coluna: o separador que mais
+	 * aparece nele. Os valores não servem para isso, porque "8,00" tem vírgula.
+	 */
+	private static char detectDelimiter(BufferedReader reader) throws IOException {
+		reader.mark(HEADER_PEEK_LIMIT);
+		String header = reader.readLine();
+		reader.reset();
+		if (header == null) {
+			return ',';
+		}
+		long semicolons = header.chars().filter(c -> c == ';').count();
+		long commas = header.chars().filter(c -> c == ',').count();
+		return semicolons > commas ? ';' : ',';
+	}
+
+	private static CSVFormat format(char delimiter) {
+		return CSVFormat.DEFAULT.builder()
+			.setDelimiter(delimiter)
+			.setHeader()
+			.setSkipHeaderRecord(true)
+			.setIgnoreHeaderCase(true)
+			.setIgnoreEmptyLines(true)
+			.setTrim(true)
+			.get();
+	}
+
 	private static void validateHeader(List<String> headerNames) {
 		if (headerNames.isEmpty()) {
 			throw new InvalidImportFileException(
@@ -110,9 +138,10 @@ class CsvTransactionParser {
 		}
 	}
 
-	private static Row parseRecord(CSVRecord record, int line) {
-		return new Row(line, parseDate(field(record, DATE)), parseAmount(field(record, AMOUNT)),
-				parseDescription(field(record, DESCRIPTION)), parseType(field(record, TYPE)));
+	private static ParsedTransaction parseRecord(CSVRecord record, char decimalSeparator) {
+		return new ParsedTransaction(parseDate(field(record, DATE)),
+				parseAmount(field(record, AMOUNT), decimalSeparator), parseDescription(field(record, DESCRIPTION)),
+				parseType(field(record, TYPE)));
 	}
 
 	private static String field(CSVRecord record, String column) {
@@ -132,25 +161,18 @@ class CsvTransactionParser {
 		}
 	}
 
-	private static BigDecimal parseAmount(String value) {
+	private static BigDecimal parseAmount(String value, char decimalSeparator) {
 		BigDecimal amount;
 		try {
-			amount = new BigDecimal(value);
+			amount = AmountParser.parse(value, decimalSeparator);
 		}
-		catch (NumberFormatException ex) {
-			throw new InvalidRowException("valor inválido '" + value + "' (use ponto como separador decimal)");
+		catch (IllegalArgumentException ex) {
+			throw new InvalidRowException(ex.getMessage());
 		}
 		if (amount.signum() <= 0) {
 			throw new InvalidRowException("valor deve ser positivo; o sentido vem da coluna type");
 		}
-		BigDecimal stripped = amount.stripTrailingZeros();
-		if (stripped.scale() > 2) {
-			throw new InvalidRowException("valor com mais de 2 casas decimais '" + value + "'");
-		}
-		if (stripped.precision() - stripped.scale() > MAX_INTEGER_DIGITS) {
-			throw new InvalidRowException("valor excede o máximo permitido");
-		}
-		return amount.setScale(2, RoundingMode.UNNECESSARY);
+		return amount;
 	}
 
 	private static String parseDescription(String value) {

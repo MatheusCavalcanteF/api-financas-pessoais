@@ -56,8 +56,11 @@ public class TransactionService {
 		Transaction transaction = findOwned(id, userId);
 		ensureCategoryOwned(request.categoryId(), userId);
 		String description = request.description().strip();
-		String hash = nextFreeHash(userId, request.date(), request.amount(), request.type(), description,
-				transaction.getUniqueHash());
+		// Hash de FITID não depende do conteúdo: recalculá-lo faria a reimportação
+		// do mesmo extrato duplicar a transação editada
+		String hash = transaction.getFitId() != null ? transaction.getUniqueHash()
+				: nextFreeHash(userId, request.date(), request.amount(), request.type(), description,
+						transaction.getUniqueHash());
 
 		transaction.update(request.categoryId(), request.amount(), request.date(), description, request.type(), hash);
 		return TransactionResponse.from(save(transaction));

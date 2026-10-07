@@ -9,6 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.math.BigDecimal;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.List;
@@ -22,6 +23,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpHeaders;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -55,6 +57,9 @@ class TransactionImportServiceTest {
 
 	@Autowired
 	private MockMvc mockMvc;
+
+	@Autowired
+	private JdbcTemplate jdbcTemplate;
 
 	private User user;
 
@@ -120,7 +125,7 @@ class TransactionImportServiceTest {
 		String csv = HEADER + "2026-10-02,5000.00,Salário,INCOME\n";
 		importCsv(csv);
 
-		ImportSummaryResponse summary = importService.importCsv(stream(csv), newUser().getId());
+		ImportSummaryResponse summary = importService.importFile(stream(csv), newUser().getId());
 
 		assertThat(summary).isEqualTo(new ImportSummaryResponse(1, 1, 0));
 	}
@@ -164,7 +169,7 @@ class TransactionImportServiceTest {
 					ex -> assertThat(ex.getErrors().getFirst()).contains("type"));
 
 		byte[] latin1 = (HEADER + "2026-10-01,8.00,Café,EXPENSE\n").getBytes(StandardCharsets.ISO_8859_1);
-		assertThatThrownBy(() -> importService.importCsv(new ByteArrayInputStream(latin1), user.getId()))
+		assertThatThrownBy(() -> importService.importFile(new ByteArrayInputStream(latin1), user.getId()))
 			.isInstanceOfSatisfying(InvalidImportFileException.class,
 					ex -> assertThat(ex.getErrors().getFirst()).contains("UTF-8"));
 	}
@@ -196,8 +201,115 @@ class TransactionImportServiceTest {
 		mockMvc.perform(multipart("/transactions/import").file(invalid)).andExpect(status().isUnauthorized());
 	}
 
+	@Test
+	void ofxDeduplicatesByFitidEvenWhenTheBankRewritesTheDescription() {
+		String transactions = """
+				<STMTTRN><DTPOSTED>20261001<TRNAMT>-8.00<FITID>1<MEMO>Café</STMTTRN>
+				<STMTTRN><DTPOSTED>20261001<TRNAMT>-8.00<FITID>2<MEMO>Café</STMTTRN>
+				<STMTTRN><DTPOSTED>20261002<TRNAMT>5000.00<FITID>3<MEMO>Salário</STMTTRN>
+				""";
+		assertThat(importOfx(transactions)).isEqualTo(new ImportSummaryResponse(3, 3, 0));
+
+		String rewritten = transactions.replace("<MEMO>", "<MEMO>COMPRA CARTAO - ");
+		assertThat(importOfx(rewritten)).isEqualTo(new ImportSummaryResponse(3, 0, 3));
+		assertThat(descriptionsOf(user)).containsExactlyInAnyOrder("Café", "Café", "Salário");
+		assertThat(rowsWithFitid()).isEqualTo(3);
+	}
+
+	@Test
+	void sameFitidInAnotherAccountIsAnotherTransaction() {
+		String transaction = "<STMTTRN><DTPOSTED>20261001<TRNAMT>-8.00<FITID>1<MEMO>Café</STMTTRN>\n";
+
+		assertThat(importOfxFile(OfxSamples.sgml("11111", transaction))).isEqualTo(new ImportSummaryResponse(1, 1, 0));
+		assertThat(importOfxFile(OfxSamples.sgml("22222", transaction))).isEqualTo(new ImportSummaryResponse(1, 1, 0));
+	}
+
+	@Test
+	void fitidReusedByTheBankForAnotherTransactionIsNotDiscarded() {
+		// Bancos que numeram o FITID por exportação: "1" em cada arquivo é outra transação
+		importOfx("<STMTTRN><DTPOSTED>20261001<TRNAMT>-8.00<FITID>1<MEMO>Café</STMTTRN>\n");
+
+		assertThat(importOfx("<STMTTRN><DTPOSTED>20261002<TRNAMT>-120.50<FITID>1<MEMO>Mercado</STMTTRN>\n"))
+			.isEqualTo(new ImportSummaryResponse(1, 1, 0));
+	}
+
+	@Test
+	void fitidRepeatedInsideTheFileFallsBackToContentHash() {
+		String transactions = """
+				<STMTTRN><DTPOSTED>20261001<TRNAMT>-8.00<FITID>1<MEMO>Café</STMTTRN>
+				<STMTTRN><DTPOSTED>20261001<TRNAMT>-8.00<FITID>1<MEMO>Café</STMTTRN>
+				""";
+
+		assertThat(importOfx(transactions)).isEqualTo(new ImportSummaryResponse(2, 2, 0));
+		assertThat(importOfx(transactions)).isEqualTo(new ImportSummaryResponse(2, 0, 2));
+		assertThat(rowsWithFitid()).isZero();
+	}
+
+	@Test
+	void editingAnOfxTransactionKeepsItDeduplicated() {
+		String transaction = "<STMTTRN><DTPOSTED>20261001<TRNAMT>-8.00<FITID>1<MEMO>CAFE 0412</STMTTRN>\n";
+		importOfx(transaction);
+		UUID id = transactionService.list(user.getId(), Pageable.unpaged()).getContent().getFirst().id();
+
+		transactionService.update(id, new TransactionRequest(new BigDecimal("8.50"), LocalDate.of(2026, 10, 1),
+				"Café da padaria", TransactionType.EXPENSE, null), user.getId());
+
+		assertThat(importOfx(transaction)).isEqualTo(new ImportSummaryResponse(1, 0, 1));
+		assertThat(descriptionsOf(user)).containsExactly("Café da padaria");
+	}
+
+	@Test
+	void ofxAndCsvDoNotDeduplicateEachOther() {
+		// Limitação aceita: hash por FITID e hash por conteúdo são namespaces separados
+		importOfx("<STMTTRN><DTPOSTED>20261001<TRNAMT>-8.00<FITID>1<MEMO>Café</STMTTRN>\n");
+
+		ImportSummaryResponse csv = importCsv("""
+				date;amount;description;type
+				2026-10-01;8,00;Café;EXPENSE
+				2026-10-02;5.000,00;Salário;INCOME
+				""");
+
+		assertThat(csv).isEqualTo(new ImportSummaryResponse(2, 2, 0));
+	}
+
+	@Test
+	void ofxWithoutFitidUsesContentHashAndMatchesCsv() {
+		importOfx("<STMTTRN><DTPOSTED>20261001<TRNAMT>-8.00<MEMO>Café</STMTTRN>\n");
+
+		assertThat(importCsv(HEADER + "2026-10-01,8.00,Café,EXPENSE\n")).isEqualTo(new ImportSummaryResponse(1, 0, 1));
+	}
+
+	@Test
+	void endpointDetectsOfxByContent() throws Exception {
+		byte[] ofx = OfxSamples.sgml("""
+				<STMTTRN><TRNTYPE>DEBIT<DTPOSTED>20261001<TRNAMT>-42.90<FITID>1<MEMO>Farmácia</STMTTRN>
+				""").getBytes(Charset.forName("windows-1252"));
+		// Nome e Content-Type enganosos de propósito: a detecção é pelo conteúdo
+		var file = new MockMultipartFile("file", "extrato.txt", "application/octet-stream", ofx);
+
+		mockMvc.perform(multipart("/transactions/import").file(file).header(HttpHeaders.AUTHORIZATION, bearer(user)))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.imported").value(1));
+
+		assertThat(descriptionsOf(user)).containsExactly("Farmácia");
+	}
+
+	private ImportSummaryResponse importOfx(String transactions) {
+		return importOfxFile(OfxSamples.sgml(transactions));
+	}
+
+	private ImportSummaryResponse importOfxFile(String ofx) {
+		return importService.importFile(new ByteArrayInputStream(ofx.getBytes(Charset.forName("windows-1252"))),
+				user.getId());
+	}
+
+	private int rowsWithFitid() {
+		return jdbcTemplate.queryForObject("select count(*) from transactions where user_id = ? and fitid is not null",
+				Integer.class, user.getId());
+	}
+
 	private ImportSummaryResponse importCsv(String csv) {
-		return importService.importCsv(stream(csv), user.getId());
+		return importService.importFile(stream(csv), user.getId());
 	}
 
 	private List<String> descriptionsOf(User owner) {

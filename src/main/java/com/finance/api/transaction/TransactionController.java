@@ -65,14 +65,15 @@ public class TransactionController {
 	}
 
 	/**
-	 * Importa um CSV com cabeçalho {@code date,amount,description,type}. Linhas já
-	 * importadas são ignoradas; qualquer linha inválida rejeita o arquivo inteiro.
+	 * Importa um extrato OFX ou CSV (cabeçalho {@code date,amount,description,type},
+	 * separado por vírgula ou ponto-e-vírgula). Lançamentos já importados são
+	 * ignorados; qualquer linha inválida rejeita o arquivo inteiro.
 	 */
 	@PostMapping(path = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-	public ImportSummaryResponse importCsv(@RequestParam("file") MultipartFile file,
+	public ImportSummaryResponse importStatement(@RequestParam("file") MultipartFile file,
 			@Parameter(hidden = true) @AuthenticationPrincipal AuthenticatedUser user) throws IOException {
-		try (InputStream csv = file.getInputStream()) {
-			return transactionImportService.importCsv(csv, user.id());
+		try (InputStream statement = file.getInputStream()) {
+			return transactionImportService.importFile(statement, user.id());
 		}
 	}
 

@@ -48,6 +48,10 @@ public class Transaction {
 	@Column(name = "unique_hash", nullable = false, length = 64)
 	private String uniqueHash;
 
+	// Só é gravado pela importação OFX (INSERT nativo); quando presente, o hash veio dele
+	@Column(name = "fitid", updatable = false, insertable = false)
+	private String fitId;
+
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private Instant createdAt;
 
@@ -65,7 +69,8 @@ public class Transaction {
 		this.createdAt = Instant.now();
 	}
 
-	// O hash depende de data, valor, tipo e descrição, então muda junto com eles
+	// O hash por conteúdo muda junto com data, valor, tipo e descrição; o de FITID
+	// é preservado pelo service
 	public void update(UUID categoryId, BigDecimal amount, LocalDate date, String description, TransactionType type,
 			String uniqueHash) {
 		this.categoryId = categoryId;
@@ -106,6 +111,10 @@ public class Transaction {
 
 	public String getUniqueHash() {
 		return uniqueHash;
+	}
+
+	public String getFitId() {
+		return fitId;
 	}
 
 	public Instant getCreatedAt() {
