@@ -17,6 +17,14 @@ spring:
         jdbc:
           time_zone: UTC
 
+  data:
+    web:
+      pageable:
+        # Impede ?size=1000000 de carregar a tabela inteira
+        max-page-size: 100
+        # JSON estável (content + page) em vez de serializar o PageImpl
+        serialization-mode: via-dto
+
   flyway:
     enabled: true
     locations: classpath:db/migration

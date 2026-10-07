@@ -5,6 +5,7 @@ import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.core.PropertyReferenceException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -49,6 +50,23 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 	@ExceptionHandler(EmailAlreadyInUseException.class)
 	ProblemDetail handleEmailAlreadyInUse(EmailAlreadyInUseException ex) {
 		return problem(HttpStatus.CONFLICT, "Conflito", ex.getMessage());
+	}
+
+	@ExceptionHandler(ResourceNotFoundException.class)
+	ProblemDetail handleNotFound(ResourceNotFoundException ex) {
+		return problem(HttpStatus.NOT_FOUND, "Não encontrado", ex.getMessage());
+	}
+
+	@ExceptionHandler(ConflictException.class)
+	ProblemDetail handleConflict(ConflictException ex) {
+		return problem(HttpStatus.CONFLICT, "Conflito", ex.getMessage());
+	}
+
+	// ?sort= com propriedade inexistente; sem isso viraria 500
+	@ExceptionHandler(PropertyReferenceException.class)
+	ProblemDetail handleInvalidSort(PropertyReferenceException ex) {
+		return problem(HttpStatus.BAD_REQUEST, "Ordenação inválida",
+				"Propriedade de ordenação inexistente: " + ex.getPropertyName());
 	}
 
 	@ExceptionHandler(BadCredentialsException.class)
