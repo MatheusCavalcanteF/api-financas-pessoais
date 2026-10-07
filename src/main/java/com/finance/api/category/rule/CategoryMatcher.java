@@ -49,6 +49,10 @@ public final class CategoryMatcher {
 		return EMPTY;
 	}
 
+	public boolean isEmpty() {
+		return rules.isEmpty();
+	}
+
 	/** @return a categoria da regra vencedora, ou {@code null} se nenhuma casar */
 	public UUID categoryFor(String description) {
 		if (rules.isEmpty()) {

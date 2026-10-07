@@ -39,6 +39,8 @@ Para desenvolvimento, `./mvnw spring-boot:run` também funciona.
 | OpenAPI (JSON) | http://localhost:8080/v3/api-docs |
 | PostgreSQL | localhost:5432 |
 
+No Swagger UI, faça login em `POST /auth/login`, clique em **Authorize** e cole o `accessToken`, sem o prefixo `Bearer`. A partir daí, todas as rotas fora de `/auth` enviam o token.
+
 ## Configuração
 
 Todas as variáveis têm um valor padrão para desenvolvimento.
@@ -147,7 +149,13 @@ curl -s -X POST http://localhost:8080/category-rules \
 
 - **Comparação.** Ignora maiúsculas, acentos e espaços extras: a keyword `café` casa com `CAFE DA PRAÇA`. A keyword precisa ter no mínimo 3 caracteres.
 - **Várias regras casando.** Vence a keyword mais longa: `uber eats` ganha de `uber`.
-- **Alcance.** As regras só valem para transações novas. Criar uma regra não reclassifica o que já foi importado, e uma duplicata ignorada mantém a categoria que já tinha.
+- **Alcance.** Na importação, as regras valem só para transações novas: uma duplicata ignorada mantém a categoria que já tinha. Para aplicar as regras ao histórico sem categoria, use o endpoint retroativo. Ele nunca troca uma categoria já definida:
+
+  ```bash
+  curl -s -X POST http://localhost:8080/category-rules/apply-retroactive \
+    -H "Authorization: Bearer $TOKEN"
+  # {"updatedCount":15}
+  ```
 - **Rotas.** O CRUD completo fica em `/category-rules`, com listagem paginada. Cada usuário pode ter até 500 regras.
 
 ### 3. Dashboard (relatório mensal)

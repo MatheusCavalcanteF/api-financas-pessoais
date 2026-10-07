@@ -28,6 +28,10 @@ import jakarta.validation.Valid;
 /**
  * Regras de categorização automática: na importação de extratos, a transação cuja
  * descrição contém a palavra-chave recebe a categoria da regra.
+ * <p>
+ * {@code POST /category-rules/apply-retroactive} fica em
+ * {@code transaction.RetroactiveCategorizationController}, para evitar dependência
+ * circular entre os pacotes.
  */
 @RestController
 @RequestMapping("/category-rules")
