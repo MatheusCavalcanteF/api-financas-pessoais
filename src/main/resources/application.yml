@@ -2,10 +2,16 @@ spring:
   application:
     name: api-financas-pessoais
 
+  config:
+    # Lê o .env da raiz (o mesmo do docker compose) ao rodar localmente.
+    # Variáveis de ambiente reais têm precedência sobre ele. ENV_FILE troca o
+    # caminho: o application.properties de teste aponta para um arquivo inexistente.
+    import: optional:file:${ENV_FILE:.env}[.properties]
+
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/financas}
     username: ${DB_USERNAME:postgres}
-    password: ${DB_PASSWORD:postgres}
+    password: ${DB_PASSWORD:}
 
   jpa:
     # Schema é responsabilidade do Flyway; Hibernate só valida o mapeamento
@@ -45,16 +51,35 @@ server:
   error:
     include-stacktrace: never
 
-# Segredo Base64 com no mínimo 256 bits. O valor padrão abaixo é SÓ para dev:
-# está versionado no git, então qualquer outro ambiente DEVE definir JWT_SECRET.
-# Gere um novo com: openssl rand -base64 64
+# Segredo Base64 com no mínimo 256 bits. Gere com: openssl rand -base64 48
 security:
   jwt:
-    secret: ${JWT_SECRET:WGkP/L4rQfrTcWjkoj2oldCl3++dRXM6zQARfDUgBYNAR+UxOZoCvKiDNuYXDfurb/RWsVSxgvQGVlL4AA5nRA==}
+    secret: ${JWT_SECRET:}
     expiration: ${JWT_EXPIRATION:PT2H}
 
+  # Limites de tentativa do /auth, por IP do cliente (veja TRUSTED_PROXIES no README)
+  rate-limit:
+    # IPs/CIDRs dos proxies cujo X-Forwarded-For é confiável (ex.: 10.0.0.5,10.1.0.0/16).
+    # Vazio: o X-Forwarded-For é ignorado e vale só o IP da conexão.
+    trusted-proxies: ${TRUSTED_PROXIES:}
+    # Teto de chaves (IPs ou pares e-mail+IP) por contador. Acima disso, as menos usadas são descartadas.
+    max-tracked-keys: 100000
+    login:
+      # Falhas seguidas do mesmo e-mail + IP até bloquear o par
+      max-failures: 5
+      lock-duration: 15m
+      # Tentativas por IP, qualquer e-mail
+      max-attempts-per-ip: 20
+      attempts-window: 1m
+    register:
+      max-per-ip: 5
+      window: 1h
+
+# Desligado por padrão; SWAGGER_ENABLED=true só em desenvolvimento
 springdoc:
   api-docs:
+    enabled: ${SWAGGER_ENABLED:false}
     path: /v3/api-docs
   swagger-ui:
+    enabled: ${SWAGGER_ENABLED:false}
     path: /swagger-ui.html

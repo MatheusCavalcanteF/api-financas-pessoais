@@ -1,4 +1,4 @@
-import { expect, readToken, REVOKED_EMAIL, SEED_USER, signIn, test } from "./helpers";
+import { expect, REVOKED_USER, SEED_USER, sessionCookie, signIn, test } from "./helpers";
 
 test.describe("autenticação", () => {
   test("sem sessão, rota protegida manda para o login guardando a origem", async ({ page }) => {
@@ -6,7 +6,7 @@ test.describe("autenticação", () => {
     await expect(page).toHaveURL(/\/login\?from=%2Ftransactions$/);
   });
 
-  test("senha errada mostra o erro do backend e continua no login", async ({ page }) => {
+  test("senha errada mostra o erro do backend e continua no login", async ({ page, context }) => {
     await page.goto("/login");
     await page.getByLabel("E-mail").fill(SEED_USER.email);
     await page.getByLabel("Senha").fill("senha-errada-123");
@@ -15,7 +15,7 @@ test.describe("autenticação", () => {
     // Escopo no form: o anunciador de rotas do Next também tem role="alert"
     await expect(page.locator("form").getByRole("alert")).toHaveText("E-mail ou senha inválidos");
     await expect(page).toHaveURL(/\/login$/);
-    expect(await readToken(page)).toBeNull();
+    expect(await sessionCookie(context)).toBeUndefined();
   });
 
   test("login leva de volta à rota de origem", async ({ page }) => {
@@ -63,18 +63,18 @@ test.describe("autenticação", () => {
     await expect(page.locator("form").getByRole("alert")).toHaveText("E-mail já cadastrado");
   });
 
-  test("401 da API (sessão expirada) limpa o token e volta ao login com a origem", async ({ page }) => {
-    await signIn(page, "/transactions", REVOKED_EMAIL);
+  test("401 da API (sessão expirada) apaga o cookie e volta ao login com a origem", async ({ page, context }) => {
+    await signIn(page, "/transactions", REVOKED_USER);
 
     await expect(page).toHaveURL(/\/login\?from=%2Ftransactions$/);
-    expect(await readToken(page)).toBeNull();
+    expect(await sessionCookie(context)).toBeUndefined();
   });
 
-  test("Sair limpa a sessão e vai para o login sem origem", async ({ page }) => {
+  test("Sair limpa a sessão e vai para o login sem origem", async ({ page, context }) => {
     await signIn(page, "/dashboard");
     await page.getByRole("button", { name: "Sair" }).click();
 
     await expect(page).toHaveURL(/\/login$/);
-    expect(await readToken(page)).toBeNull();
+    expect(await sessionCookie(context)).toBeUndefined();
   });
 });

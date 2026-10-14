@@ -25,7 +25,7 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
 
   // Único ponto de saída da tela: cobre quem já chega logado e o login/cadastro
-  // bem-sucedido (signIn grava o token, o status muda e este efeito redireciona).
+  // bem-sucedido (signIn abre a sessão, o status muda e este efeito redireciona).
   useEffect(() => {
     if (status !== "authenticated") return;
     const from = new URLSearchParams(window.location.search).get("from");

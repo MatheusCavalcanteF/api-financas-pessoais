@@ -1,0 +1,47 @@
+# LEMBRETE: o pom.xml fixa <tomcat.version>11.0.27</tomcat.version> por causa das
+# CVE-2026-65182, CVE-2026-65905 e CVE-2026-68525 (o Spring Boot 4.1.1 traz 11.0.24).
+# Quando o Dependabot atualizar o spring-boot-starter-parent para uma versão que já
+# traga Tomcat >= 11.0.27, remova esse override no mesmo PR. O Dependabot não mexe
+# nessa propriedade, e se ela ficar acaba prendendo o Tomcat numa versão mais antiga
+# que a do Spring Boot.
+#
+# github-actions e docker-compose ficam de fora de propósito: o repo não tem workflows
+# e um bump major do Postgres quebraria o volume de dados local.
+
+version: 2
+updates:
+  - package-ecosystem: "maven"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+    groups:
+      maven-minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+    groups:
+      npm-minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"

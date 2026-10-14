@@ -1,52 +1,9 @@
-import { jwtDecode } from "jwt-decode";
-
 import type { Role, UUID } from "@/types";
-
-const TOKEN_KEY = "financas.token";
-// O evento "storage" só dispara em outras abas; este avisa a aba atual
-const TOKEN_CHANGE_EVENT = "financas:token-change";
 
 export const DEFAULT_AFTER_LOGIN = "/dashboard";
 
-// localStorage só existe no browser: em Server Components não há token e as
-// chamadas autenticadas devem partir de Client Components.
-export const tokenStorage = {
-  get(): string | null {
-    if (typeof window === "undefined") return null;
-    return window.localStorage.getItem(TOKEN_KEY);
-  },
-  set(token: string): void {
-    window.localStorage.setItem(TOKEN_KEY, token);
-    window.dispatchEvent(new Event(TOKEN_CHANGE_EVENT));
-  },
-  clear(): void {
-    if (typeof window === "undefined") return;
-    window.localStorage.removeItem(TOKEN_KEY);
-    window.dispatchEvent(new Event(TOKEN_CHANGE_EVENT));
-  },
-  /** Para useSyncExternalStore: avisa quando o token muda nesta aba ou em outra */
-  subscribe(onChange: () => void): () => void {
-    const onStorage = (event: StorageEvent) => {
-      if (event.key === TOKEN_KEY || event.key === null) onChange();
-    };
-    window.addEventListener(TOKEN_CHANGE_EVENT, onChange);
-    window.addEventListener("storage", onStorage);
-    return () => {
-      window.removeEventListener(TOKEN_CHANGE_EVENT, onChange);
-      window.removeEventListener("storage", onStorage);
-    };
-  },
-};
-
-// Claims emitidos pelo JwtService do backend. Atenção: `sub` é o UUID do
-// usuário, não o e-mail; o e-mail vem no claim `email`.
-interface TokenClaims {
-  sub: UUID;
-  email: string;
-  role: Role;
-  exp: number;
-}
-
+// O JWT vive num cookie httpOnly que o JavaScript não lê nem apaga: quem grava e
+// apaga são os Route Handlers de /api/auth. Aqui só ficam os dados para exibir.
 export interface AuthUser {
   id: UUID;
   email: string;
@@ -54,23 +11,40 @@ export interface AuthUser {
   expiresAt: Date;
 }
 
-/**
- * Lê os claims do token SEM validar a assinatura (isso é papel do backend).
- * Retorna null para token malformado, sem os claims esperados ou já expirado.
- */
-export function decodeToken(token: string): AuthUser | null {
-  let claims: Partial<TokenClaims>;
+// Chave em que versões antigas guardavam o JWT no localStorage
+const LEGACY_TOKEN_KEY = "financas.token";
+
+/** Apaga o token que versões antigas deixaram no localStorage */
+export function clearLegacyToken(): void {
   try {
-    claims = jwtDecode<Partial<TokenClaims>>(token);
+    window.localStorage.removeItem(LEGACY_TOKEN_KEY);
   } catch {
-    return null;
+    // localStorage bloqueado (modo privado, política do navegador): não há o que apagar
   }
+}
 
-  const { sub, email, role, exp } = claims;
-  if (!sub || !email || !role || typeof exp !== "number") return null;
-  if (exp * 1000 <= Date.now()) return null;
+// Cookie não dispara evento entre abas como o "storage" do localStorage: login e
+// logout avisam as outras abas por aqui, e elas consultam a sessão de novo.
+// Um canal só por aba: o BroadcastChannel não entrega a mensagem ao próprio emissor.
+let authChannel: BroadcastChannel | null | undefined;
 
-  return { id: sub, email, role, expiresAt: new Date(exp * 1000) };
+function getAuthChannel(): BroadcastChannel | null {
+  if (authChannel === undefined) {
+    authChannel = typeof BroadcastChannel === "undefined" ? null : new BroadcastChannel("financas:auth");
+  }
+  return authChannel;
+}
+
+export function notifyAuthChange(): void {
+  getAuthChannel()?.postMessage("changed");
+}
+
+/** Avisa quando outra aba entrou ou saiu */
+export function subscribeAuthChange(onChange: () => void): () => void {
+  const channel = getAuthChannel();
+  if (!channel) return () => {};
+  channel.addEventListener("message", onChange);
+  return () => channel.removeEventListener("message", onChange);
 }
 
 /**
@@ -93,19 +67,41 @@ export function safeRedirectPath(from: string | null | undefined): string {
   return url.pathname + url.search + url.hash;
 }
 
+async function logout(): Promise<void> {
+  try {
+    // fetch direto, não a instância `api`: lib/api importa este módulo (ciclo) e o
+    // interceptor de 401 chamaria redirectToLogin de novo
+    await fetch("/api/auth/logout", { method: "POST", signal: AbortSignal.timeout(5000) });
+  } catch {
+    // Sem resposta: segue para o login. Num 401 da API o catch-all já apagou o cookie.
+  }
+  notifyAuthChange();
+}
+
 // Evita redirects concorrentes (vários 401 em paralelo, logout + guarda de rota)
 let redirectingToLogin = false;
 
 /**
- * Limpa a sessão e vai para /login com navegação completa: funciona fora do
+ * Encerra a sessão e vai para /login com navegação completa: funciona fora do
  * React (interceptor) e descarta qualquer estado em memória do usuário anterior.
+ *
+ * `clearSession: false` pula o logout quando já se sabe que não há cookie válido
+ * (guarda de rota depois de /api/auth/session responder 401).
  */
-export function redirectToLogin({ keepFrom }: { keepFrom: boolean }): void {
-  tokenStorage.clear();
+export async function redirectToLogin({
+  keepFrom,
+  clearSession = true,
+}: {
+  keepFrom: boolean;
+  clearSession?: boolean;
+}): Promise<void> {
   if (typeof window === "undefined" || redirectingToLogin) return;
-  if (window.location.pathname === "/login") return;
+  const onLoginPage = window.location.pathname === "/login";
+  if (!onLoginPage) redirectingToLogin = true;
 
-  redirectingToLogin = true;
+  if (clearSession) await logout();
+  if (onLoginPage) return;
+
   const from = window.location.pathname + window.location.search;
   const target = keepFrom ? `/login?from=${encodeURIComponent(from)}` : "/login";
   window.location.assign(target);

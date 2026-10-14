@@ -24,6 +24,7 @@ import org.springframework.web.method.annotation.HandlerMethodValidationExceptio
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
 import com.finance.api.auth.EmailAlreadyInUseException;
+import com.finance.api.security.ratelimit.RateLimitExceededException;
 import com.finance.api.transaction.InvalidImportFileException;
 
 /**
@@ -97,6 +98,13 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 	ProblemDetail handleInvalidSort(PropertyReferenceException ex) {
 		return problem(HttpStatus.BAD_REQUEST, "Ordenação inválida",
 				"Propriedade de ordenação inexistente: " + ex.getPropertyName());
+	}
+
+	@ExceptionHandler(RateLimitExceededException.class)
+	ResponseEntity<ProblemDetail> handleRateLimitExceeded(RateLimitExceededException ex) {
+		return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+			.header(HttpHeaders.RETRY_AFTER, Long.toString(ex.getRetryAfterSeconds()))
+			.body(problem(HttpStatus.TOO_MANY_REQUESTS, "Muitas tentativas", ex.getMessage()));
 	}
 
 	@ExceptionHandler(BadCredentialsException.class)

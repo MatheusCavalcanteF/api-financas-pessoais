@@ -8,13 +8,14 @@ import { useAuth } from "@/components/auth-provider";
 import { redirectToLogin } from "@/lib/auth";
 
 // Área logada: toda rota dentro de (app)/ ganha a guarda e a navegação.
-// A guarda é só de UX: o token vive no localStorage, então não dá para checar no
-// servidor. Quem protege os dados de verdade é o backend (401 sem token válido).
+// A guarda é só de UX e roda no cliente (a página sai prerenderizada). Quem protege
+// os dados de verdade é o backend (401 sem token válido).
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { status, user, signOut } = useAuth();
 
   useEffect(() => {
-    if (status === "unauthenticated") redirectToLogin({ keepFrom: true });
+    // A sessão já respondeu sem cookie válido: não há o que apagar no logout
+    if (status === "unauthenticated") void redirectToLogin({ keepFrom: true, clearSession: false });
   }, [status]);
 
   if (status !== "authenticated" || !user) {

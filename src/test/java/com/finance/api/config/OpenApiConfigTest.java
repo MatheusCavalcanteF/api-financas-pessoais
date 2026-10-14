@@ -15,10 +15,10 @@ import com.finance.api.TestcontainersConfiguration;
 
 /**
  * O Swagger UI decide o cadeado e o envio do header pelo documento OpenAPI, então
- * é ele que se verifica.
+ * é ele que se verifica. O springdoc vem desligado por padrão, então é ligado só aqui.
  */
 @Import(TestcontainersConfiguration.class)
-@SpringBootTest
+@SpringBootTest(properties = "SWAGGER_ENABLED=true")
 @AutoConfigureMockMvc
 class OpenApiConfigTest {
 

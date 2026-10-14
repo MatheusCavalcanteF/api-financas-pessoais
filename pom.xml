@@ -20,6 +20,9 @@
 		<jjwt.version>0.13.0</jjwt.version>
 		<springdoc.version>3.1.1</springdoc.version>
 		<commons-csv.version>1.14.1</commons-csv.version>
+		<!-- Override do Tomcat 11.0.24 (Spring Boot 4.1.1) por causa das CVE-2026-65182, CVE-2026-65905 e CVE-2026-68525.
+		     REMOVER esta linha ao atualizar o Spring Boot para uma versão que já traga Tomcat >= 11.0.27. -->
+		<tomcat.version>11.0.27</tomcat.version>
 	</properties>
 
 	<dependencies>
@@ -78,6 +81,12 @@
 			<artifactId>jjwt-jackson</artifactId>
 			<version>${jjwt.version}</version>
 			<scope>runtime</scope>
+		</dependency>
+
+		<!-- Rate limit: contadores em memória com tamanho máximo e expiração (versão gerenciada pelo Spring Boot) -->
+		<dependency>
+			<groupId>com.github.ben-manes.caffeine</groupId>
+			<artifactId>caffeine</artifactId>
 		</dependency>
 
 		<!-- Importação -->

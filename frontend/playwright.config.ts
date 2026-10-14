@@ -34,7 +34,12 @@ export default defineConfig({
     {
       command: `npm run build && npm run start -- -p ${APP_PORT}`,
       url: `http://localhost:${APP_PORT}/login`,
-      env: { NEXT_DIST_DIR: ".next-e2e", BACKEND_URL: `http://localhost:${MOCK_PORT}` },
+      env: {
+        NEXT_DIST_DIR: ".next-e2e",
+        BACKEND_URL: `http://localhost:${MOCK_PORT}`,
+        // Origem que os Route Handlers aceitam no header Origin (manter em sincronia com e2e/helpers.ts)
+        APP_ORIGIN: `http://localhost:${APP_PORT}`,
+      },
       timeout: 180_000,
       reuseExistingServer: false,
     },

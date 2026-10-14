@@ -1,6 +1,6 @@
 import axios, { isAxiosError, type AxiosError } from "axios";
 
-import { redirectToLogin, tokenStorage } from "@/lib/auth";
+import { redirectToLogin } from "@/lib/auth";
 import type {
   ApiError,
   Category,
@@ -8,44 +8,41 @@ import type {
   CategoryRule,
   CategoryRuleRequest,
   ImportSummaryResponse,
+  LoginRequest,
   MonthlyReportResponse,
   Page,
+  RegisterRequest,
   RetroactiveCategorizationResponse,
+  SessionUser,
   Transaction,
+  User,
   UUID,
 } from "@/types";
 
-// O Next faz proxy de /api/* para o backend (rewrites em next.config.ts),
-// então o browser só fala com a própria origem e não há CORS.
+// /api/* são Route Handlers do Next (src/app/api): o browser só fala com a própria
+// origem, sem CORS. O JWT fica num cookie httpOnly que o navegador manda sozinho, e
+// o Route Handler é quem injeta o Authorization na chamada ao backend.
 export const API_BASE_URL = "/api";
 
-// Únicas rotas liberadas no SecurityConfig do backend. Não levam token, e um 401
-// nelas é credencial inválida (deve aparecer no formulário), não sessão expirada.
-const PUBLIC_PATHS = ["/auth/login", "/auth/register"];
+// Rotas de autenticação: um 401 nelas é credencial inválida (deve aparecer no
+// formulário) ou ausência de sessão, não sessão expirada. Não redirecionam.
+const AUTH_PATHS = ["/auth/login", "/auth/register", "/auth/session", "/auth/logout"];
 
-function isPublicPath(url: string | undefined): boolean {
+function isAuthPath(url: string | undefined): boolean {
   if (!url) return false;
   const path = url.split(/[?#]/)[0];
-  return PUBLIC_PATHS.includes(path.startsWith("/") ? path : `/${path}`);
+  return AUTH_PATHS.includes(path.startsWith("/") ? path : `/${path}`);
 }
 
 // Sem Content-Type fixo: o axios usa JSON para objetos e multipart para FormData.
 // Forçar "application/json" faria o FormData do /transactions/import virar JSON.
 export const api = axios.create({ baseURL: API_BASE_URL });
 
-api.interceptors.request.use((config) => {
-  if (!isPublicPath(config.url)) {
-    const token = tokenStorage.get();
-    if (token) config.headers.set("Authorization", `Bearer ${token}`);
-  }
-  return config;
-});
-
 api.interceptors.response.use(
   (response) => response,
   (error: AxiosError<ApiError>) => {
-    if (error.response?.status === 401 && !isPublicPath(error.config?.url)) {
-      redirectToLogin({ keepFrom: true });
+    if (error.response?.status === 401 && !isAuthPath(error.config?.url)) {
+      void redirectToLogin({ keepFrom: true });
     }
     return Promise.reject(error);
   },
@@ -88,6 +85,24 @@ export function getErrorList(error: unknown): string[] {
 interface RequestOptions {
   /** Cancela a requisição, ex. quando o componente troca de filtro antes da resposta */
   signal?: AbortSignal;
+}
+
+/** POST /api/auth/login — Route Handler: grava o cookie de sessão e devolve só o usuário, nunca o token */
+export async function login(credentials: LoginRequest): Promise<SessionUser> {
+  const { data } = await api.post<SessionUser>("/auth/login", credentials);
+  return data;
+}
+
+/** POST /auth/register — público; não abre sessão (o cadastro faz login em seguida) */
+export async function register(request: RegisterRequest): Promise<User> {
+  const { data } = await api.post<User>("/auth/register", request);
+  return data;
+}
+
+/** GET /api/auth/session — usuário do cookie de sessão; 401 se não houver sessão válida */
+export async function getSession({ signal }: RequestOptions = {}): Promise<SessionUser> {
+  const { data } = await api.get<SessionUser>("/auth/session", { signal });
+  return data;
 }
 
 /** GET /reports/monthly — month vai de 1 a 12 */

@@ -8,8 +8,10 @@ const NOW = "2026-10-07T00:00:00Z";
 
 // Manter em sincronia com e2e/helpers.ts
 const SEED_USER = { email: "teste@exemplo.com", password: "senha-segura-123" };
-// Token com este e-mail é "revogado": a API responde 401 (simula sessão expirada)
-const REVOKED_EMAIL = "revogado@exemplo.com";
+// Este usuário entra normalmente, mas a API recusa o token dele com 401 (simula sessão expirada ou revogada)
+const REVOKED_USER = { email: "revogado@exemplo.com", password: "senha-revogada-123" };
+// Login com este e-mail leva 429, como o AuthRateLimiter quando o limite estoura
+const RATE_LIMITED_EMAIL = "bloqueado@exemplo.com";
 
 const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
 const makeToken = (email) =>
@@ -72,12 +74,19 @@ function reset() {
     ] },
   };
 
-  state = { users: new Map([[SEED_USER.email, SEED_USER.password]]), categories, transactions, rules, reports, log: [] };
+  state = {
+    users: new Map([[SEED_USER.email, SEED_USER.password], [REVOKED_USER.email, REVOKED_USER.password]]),
+    categories, transactions, rules, reports, log: [],
+  };
 }
 reset();
 
 const sortCategories = () => state.categories.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
 sortCategories();
+
+// Toda requisição que chega (menos /__last-request e /__health), para os testes provarem
+// o que o proxy do Next repassa ou não. Não zera no /__reset: a contagem só cresce.
+const received = { count: 0, last: null };
 
 http
   .createServer((req, res) => {
@@ -92,9 +101,21 @@ function handle(req, res, raw) {
   const [, resource, id, action] = url.pathname.split("/");
   const method = req.method;
 
-  const send = (status, body, delay = 120) =>
+  if (url.pathname !== "/__last-request" && url.pathname !== "/__health") {
+    received.count++;
+    received.last = {
+      method,
+      path: url.pathname + url.search,
+      authorization: req.headers.authorization ?? null,
+      cookie: req.headers.cookie ?? null,
+      xForwardedFor: req.headers["x-forwarded-for"] ?? null,
+    };
+  }
+
+  const send = (status, body, delay = 120, headers = {}) =>
     setTimeout(() => {
       res.statusCode = status;
+      for (const [name, value] of Object.entries(headers)) res.setHeader(name, value);
       if (body === undefined) return res.end();
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(body));
@@ -106,6 +127,7 @@ function handle(req, res, raw) {
   if (url.pathname === "/__health") return send(200, { ok: true }, 0);
   if (url.pathname === "/__reset") return reset(), sortCategories(), send(200, { ok: true }, 0);
   if (url.pathname === "/__log") return send(200, state.log, 0);
+  if (url.pathname === "/__last-request") return send(200, received, 0);
   // 230 regras extras para testar a paginação de /category-rules (máx. 100 por página)
   if (url.pathname === "/__seed-rules") {
     for (let i = 0; i < 230; i++) {
@@ -117,6 +139,11 @@ function handle(req, res, raw) {
   // --- Rotas públicas ---
   if (url.pathname === "/auth/login" && method === "POST") {
     const { email, password } = json();
+    if (email === RATE_LIMITED_EMAIL) {
+      return send(429, { type: "about:blank", title: "Muitas tentativas", status: 429, detail: "Tente novamente em 15 minutos." }, 120, {
+        "Retry-After": "900",
+      });
+    }
     if (state.users.get(email) !== password) return problem(401, "Credenciais inválidas", "E-mail ou senha inválidos");
     return send(200, { accessToken: makeToken(email), tokenType: "Bearer", expiresIn: 7200 });
   }
@@ -129,7 +156,7 @@ function handle(req, res, raw) {
 
   // --- Daqui em diante, como o JwtAuthenticationFilter ---
   const claims = readToken(req.headers.authorization ?? "");
-  if (!claims || claims.email === REVOKED_EMAIL) {
+  if (!claims || claims.email === REVOKED_USER.email) {
     return problem(401, "Não autenticado", "Token ausente, inválido ou expirado");
   }
 

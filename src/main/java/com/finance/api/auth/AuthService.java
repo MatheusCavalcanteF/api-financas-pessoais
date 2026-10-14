@@ -68,7 +68,8 @@ public class AuthService {
 		return TokenResponse.bearer(token, jwtService.getExpiration().toSeconds());
 	}
 
-	private static String normalizeEmail(String email) {
+	// Também usado pelo AuthRateLimiter: o contador de falhas segue a mesma identidade do login
+	static String normalizeEmail(String email) {
 		return email.trim().toLowerCase(Locale.ROOT);
 	}
 

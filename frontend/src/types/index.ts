@@ -23,7 +23,7 @@ export interface User {
   createdAt: IsoInstant;
 }
 
-/** TokenResponse — retornado por POST /auth/login */
+/** TokenResponse — retornado por POST /auth/login. Só o Route Handler de login o lê; o navegador nunca o recebe */
 export interface TokenResponse {
   accessToken: string;
   tokenType: "Bearer";
@@ -149,4 +149,18 @@ export interface CategoryRuleRequest {
   /** Ao menos 3 caracteres além de espaços, máximo 100 */
   keyword: string;
   categoryId: UUID;
+}
+
+// ---------- Rotas do próprio Next (/api/auth/*), não são DTOs do backend ----------
+
+/**
+ * Usuário da sessão, devolvido por POST /api/auth/login e GET /api/auth/session.
+ * Vem dos claims do JWT, que fica num cookie httpOnly e nunca chega ao JavaScript.
+ */
+export interface SessionUser {
+  id: UUID;
+  email: string;
+  role: Role;
+  /** Quando o token expira */
+  expiresAt: IsoInstant;
 }
