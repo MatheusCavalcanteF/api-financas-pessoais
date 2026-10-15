@@ -1,12 +1,13 @@
-# LEMBRETE: o pom.xml fixa <tomcat.version>11.0.27</tomcat.version> por causa das
-# CVE-2026-65182, CVE-2026-65905 e CVE-2026-68525 (o Spring Boot 4.1.1 traz 11.0.24).
-# Quando o Dependabot atualizar o spring-boot-starter-parent para uma versão que já
-# traga Tomcat >= 11.0.27, remova esse override no mesmo PR. O Dependabot não mexe
-# nessa propriedade, e se ela ficar acaba prendendo o Tomcat numa versão mais antiga
-# que a do Spring Boot.
+# LEMBRETE: o pom.xml fixa versões acima das que o Spring Boot 4.1.1 traz:
+#   - <tomcat.version>11.0.27</tomcat.version> (CVE-2026-65182, CVE-2026-65905, CVE-2026-68525; o Boot traz 11.0.24)
+#   - <jackson-bom.version>3.1.7</jackson-bom.version> e <jackson-2-bom.version>2.21.7</jackson-2-bom.version>
+#     (alertas #2 a #15; o Boot traz 3.1.5 e 2.21.5)
+# Quando o Dependabot atualizar o spring-boot-starter-parent para uma versão que já traga
+# versões iguais ou maiores, remova os overrides no mesmo PR. O Dependabot não mexe nessas
+# propriedades, e se elas ficarem acabam prendendo as libs em versões mais antigas que as do Boot.
 #
-# github-actions e docker-compose ficam de fora de propósito: o repo não tem workflows
-# e um bump major do Postgres quebraria o volume de dados local.
+# docker-compose fica de fora de propósito: um bump major do Postgres quebraria o volume de
+# dados local.
 
 version: 2
 updates:
@@ -45,3 +46,14 @@ updates:
         update-types:
           - "minor"
           - "patch"
+
+  # Mantém as actions do .github/workflows/ci.yml atualizadas
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
