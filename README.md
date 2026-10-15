@@ -1,8 +1,54 @@
 # API de Finanças Pessoais
 
-API REST para controle financeiro: transações, categorias, importação de extratos (CSV e OFX) com deduplicação e relatório mensal para dashboard.
+[![CI](https://github.com/MatheusCavalcanteF/api-financas-pessoais/actions/workflows/ci.yml/badge.svg)](https://github.com/MatheusCavalcanteF/api-financas-pessoais/actions/workflows/ci.yml)
 
-Java 25 · Spring Boot 4.1 · PostgreSQL 16 · Flyway · Spring Security + JWT
+Aplicação full stack de controle financeiro: transações, categorias, importação de extratos bancários (CSV e OFX) com deduplicação, categorização automática por palavra-chave e relatório mensal para dashboard. A API fica na raiz do repositório e a interface web em [`frontend/`](./frontend).
+
+**Backend:** Java 25 · Spring Boot 4.1 · Spring Security + JWT · PostgreSQL 16 · Flyway · Testcontainers
+
+**Frontend:** Next.js 16 · React 19 · TypeScript · Tailwind CSS · Playwright
+
+## Destaques
+
+- **Importação de extratos** CSV (formato brasileiro ou com ponto decimal) e OFX 1.x/2.x, com o formato detectado pelo conteúdo. Reimportar o mesmo extrato não duplica nada: a deduplicação usa o `FITID` do banco ou um hash do lançamento, gravada com `ON CONFLICT DO NOTHING` em lote.
+- **Categorização automática** por regras de palavra-chave que ignoram maiúsculas e acentos, aplicadas na importação ou retroativamente.
+- **Relatório mensal** agregado no banco numa única consulta, para os números do dashboard baterem entre si.
+- **Isolamento entre usuários** garantido em todas as consultas e coberto por testes de integração.
+- **Segurança tratada como requisito**, do armazenamento das senhas aos headers HTTP (veja [Decisões de segurança](#decisões-de-segurança)).
+- **CI** no GitHub Actions a cada pull request: testes de integração do backend com PostgreSQL real (Testcontainers), lint e build do frontend e testes E2E com Playwright.
+
+## Arquitetura
+
+```mermaid
+flowchart LR
+    B["Navegador"] -- "/api/* na mesma origem<br/>cookie HttpOnly" --> N["Next.js<br/>Route Handlers"]
+    N -- "Authorization: Bearer" --> A["API Spring Boot"]
+    A --> P[("PostgreSQL")]
+```
+
+O navegador nunca fala direto com a API. Os Route Handlers do Next guardam o JWT num cookie `HttpOnly` e repassam para o backend só os recursos que o app usa. Por isso a API não precisa de CORS e o token nunca chega ao JavaScript. Detalhes em [`frontend/README.md`](./frontend/README.md).
+
+## Decisões de segurança
+
+| Tema | Como foi tratado |
+| --- | --- |
+| Segredos | `.env` fora do git. `JWT_SECRET` e `DB_PASSWORD` não têm valor padrão: sem eles a aplicação não sobe, e um segredo JWT com menos de 256 bits é recusado na inicialização. |
+| Senhas | BCrypt, com limite de 72 bytes validado na entrada. Os DTOs de login e cadastro mascaram a senha no `toString()`, para ela não vazar em log. |
+| Autenticação | JWT assinado com HMAC-SHA, com emissor e expiração (2h), validado a cada requisição. O login leva o mesmo tempo para e-mail cadastrado ou não, então não revela quais contas existem. |
+| Força bruta | Limite de tentativas por IP e bloqueio por e-mail + IP, com `429` e `Retry-After`. Veja [Rate limit](#rate-limit). |
+| Acesso a dados de outro usuário (IDOR) | Toda consulta filtra pelo usuário do token, que nunca vem de parâmetro ou corpo. Recurso de outro usuário responde `404`, igual a um inexistente. Coberto pelo `DataIsolationTest`. |
+| Mass assignment | Entrada só por DTOs explícitos. O perfil (`role`) nunca vem do payload: todo cadastro público é `USER`. |
+| SQL injection | Consultas JPA e JDBC sempre parametrizadas. |
+| Validação de entrada | Bean Validation nos DTOs e nos parâmetros de rota e de query. Erros saem como `400` no formato `ProblemDetail`. |
+| Upload | Até 5 MB e 10.000 linhas. Formato detectado pelo conteúdo, não pela extensão. O OFX é lido sem parser XML (sem risco de XXE). Qualquer linha inválida rejeita o arquivo inteiro. |
+| Vazamento de informação | Respostas de erro sem stacktrace, `500` com mensagem genérica, paginação limitada a 100 itens e Swagger desligado por padrão. |
+| Sessão no navegador | JWT em cookie `HttpOnly` e `SameSite=Strict`, com `Secure` e prefixo `__Host-` em produção. |
+| CSRF | Mutações em `/api/*` exigem `Origin` igual à origem do app, e requisições `Sec-Fetch-Site: cross-site` são recusadas. |
+| Proxy do frontend | Só repassa uma lista fixa de recursos e de headers, valida o caminho, não segue redirect e tem timeout. |
+| Headers HTTP | CSP, HSTS (em produção), `X-Frame-Options: DENY`, `X-Content-Type-Options`, `Referrer-Policy` e `Permissions-Policy`. |
+| Dependências | Dependabot semanal para Maven, npm e GitHub Actions. Versões corrigidas de Tomcat e Jackson fixadas no `pom.xml` enquanto o Spring Boot não as traz. |
+
+Limitações conhecidas e o detalhamento do rate limit atrás de proxy estão em [`docs/SECURITY.md`](./docs/SECURITY.md).
 
 ## Pré-requisitos
 
@@ -51,6 +97,8 @@ O Swagger UI e o `/v3/api-docs` só existem com `SWAGGER_ENABLED=true`, que já 
 
 No Swagger UI, faça login em `POST /auth/login`, clique em **Authorize** e cole o `accessToken`, sem o prefixo `Bearer`. A partir daí, todas as rotas fora de `/auth` enviam o token.
 
+Para a interface web, veja [`frontend/README.md`](./frontend/README.md).
+
 ## Configuração
 
 As variáveis podem vir do `.env` ou do ambiente; o ambiente tem precedência. `DB_PASSWORD` e `JWT_SECRET` não têm valor padrão: sem elas, o banco não sobe e a aplicação também não.
@@ -64,7 +112,7 @@ As variáveis podem vir do `.env` ou do ambiente; o ambiente tem precedência. `
 | `JWT_SECRET` | — | Base64, mínimo 256 bits. **Obrigatório.** Gere com `openssl rand -base64 48` |
 | `JWT_EXPIRATION` | `PT2H` | Validade do token (ISO-8601) |
 | `SWAGGER_ENABLED` | `false` | Liga o Swagger UI e o `/v3/api-docs`. Só em desenvolvimento |
-| `TRUSTED_PROXIES` | vazio | IPs/CIDRs separados por vírgula dos proxies cujo `X-Forwarded-For` é confiável. Veja [Rate limit](#rate-limit) |
+| `TRUSTED_PROXIES` | vazio | IPs/CIDRs separados por vírgula dos proxies cujo `X-Forwarded-For` é confiável. Veja [`docs/SECURITY.md`](./docs/SECURITY.md#ip-do-cliente-e-trusted_proxies) |
 
 **A porta 5432 já está em uso?** Mude o mapeamento no `docker-compose.yml` (ex.: `"127.0.0.1:5433:5432"`) e aponte a aplicação para ela:
 
@@ -82,28 +130,7 @@ DB_URL=jdbc:postgresql://localhost:5433/financas java -jar target/api-0.0.1-SNAP
 | Tentativas de login por IP, qualquer e-mail | 20 por minuto |
 | Tentativas de cadastro por IP | 5 por hora |
 
-- **Resposta.** Estourou, a API responde `429` com `ProblemDetail` (título "Muitas tentativas") e o header `Retry-After` em segundos. Durante o bloqueio a senha nem é conferida, e a resposta é a mesma para e-mail cadastrado ou não.
-- **Janela.** Os limites por IP usam janela deslizante: "20 por minuto" vale para qualquer intervalo de 60 segundos, não para o minuto do relógio.
-- **Configuração.** Os números ficam em `security.rate-limit` no `application.yml`. Os contadores ficam em memória e expiram sozinhos, com teto de `max-tracked-keys` chaves por contador. Por isso cada instância da API conta separado e um restart zera tudo.
-
-### IP do cliente e `TRUSTED_PROXIES`
-
-Por padrão, o IP é o da conexão TCP (`getRemoteAddr()`), e os headers `X-Forwarded-For`, `Forwarded` e `X-Real-IP` são ignorados, porque qualquer cliente pode escrevê-los.
-
-Quando a conexão vem de um IP listado em `TRUSTED_PROXIES`, a API lê o `X-Forwarded-For` da direita para a esquerda e usa o primeiro endereço que não é de proxy confiável. O que estiver à esquerda dele foi escrito pelo cliente e não vale. `server.forward-headers-strategy` fica desligado de propósito: ele confiaria no header vindo de qualquer IP de rede interna.
-
-Isso só funciona se algum proxy do caminho **acrescentar** o IP real ao `X-Forwarded-For`. O proxy do Next (Route Handler `/api/[...path]` do frontend) não acrescenta: quando o cliente não manda o header, o Next o preenche com o IP da conexão; quando manda, o Next mantém o valor enviado pelo cliente, sem acrescentar nada. Como esse valor pode ter sido escrito pelo cliente, o header só é confiável com um proxy na frente do Next que acrescente o IP. Na prática:
-
-- **Navegador → Next → API, sem nada na frente do Next.** Deixe `TRUSTED_PROXIES` vazio. Todos os usuários chegam com o IP do Next, então os limites por IP viram limites globais (20 logins por minuto e 5 cadastros por hora para o sistema inteiro), e 5 senhas erradas bloqueiam aquele e-mail para todo mundo. Se você colocar o IP do Next em `TRUSTED_PROXIES` nesse cenário, o cliente escolhe o próprio IP pelo header.
-- **Navegador → proxy reverso → Next → API.** Use um proxy que acrescente o IP (nginx com `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for`, ou um load balancer) e liste em `TRUSTED_PROXIES` o IP do Next e de qualquer outro proxy entre ele e a API. O Next também não pode ser acessível sem passar por esse proxy.
-
-Prefira IPs exatos a faixas largas como `10.0.0.0/8`: qualquer coisa que abra conexão a partir de um IP da lista pode escolher o IP que a API vai enxergar.
-
-### Em produção, a API não pode ficar acessível direto
-
-A porta da API (8080) só deve aceitar conexões do Next ou do proxy, nunca da internet: rede interna do Docker sem `ports:` publicado, firewall ou security group. A confiança no `X-Forwarded-For` depende de quem consegue chegar à API vindo de um IP de `TRUSTED_PROXIES`. Um exemplo de como isso falha: com a porta publicada no host, o Docker pode trocar o IP de origem de quem vem de fora pelo IP do gateway da rede (ex.: `172.17.0.1`). Se esse IP estiver dentro de um CIDR de `TRUSTED_PROXIES`, qualquer pessoa na internet escolhe o próprio IP pelo header.
-
-No cenário com proxy reverso, o mesmo vale para o Next: ele só pode ser acessado pelo proxy. Quem chega no Next sem passar pelo proxy escolhe o IP que a API enxerga, porque o Next mantém o `X-Forwarded-For` que o cliente mandou (só o preenche com o IP da conexão quando o header não vem) e a API confia no Next.
+Estourou, a API responde `429` com `ProblemDetail` (título "Muitas tentativas") e o header `Retry-After` em segundos. Durante o bloqueio a senha nem é conferida, e a resposta é a mesma para e-mail cadastrado ou não. Janela deslizante, contadores em memória e o comportamento atrás de proxy reverso estão em [`docs/SECURITY.md`](./docs/SECURITY.md#rate-limit).
 
 ## Testes
 
@@ -112,6 +139,8 @@ No cenário com proxy reverso, o mesmo vale para o Next: ele só pode ser acessa
 ```
 
 Os testes de integração sobem um PostgreSQL descartável via Testcontainers, então o Docker precisa estar rodando. Eles não usam o banco do `docker-compose` e não dependem do `.env`: o segredo JWT de teste fica em `src/test/resources/application.properties`.
+
+O frontend tem lint, build e uma suíte E2E com Playwright (`npm run test:e2e` em `frontend/`). O [CI](.github/workflows/ci.yml) roda tudo isso a cada pull request.
 
 ## Testando os fluxos com curl
 
@@ -244,4 +273,4 @@ Os pacotes são organizados por domínio, em `src/main/java/com/finance/api`:
 | `report` | Relatório mensal |
 | `shared` | Tratamento de erros (`ProblemDetail`) e validações |
 
-As migrations ficam em `src/main/resources/db/migration`.
+As migrations ficam em `src/main/resources/db/migration`. A interface web fica em [`frontend/`](./frontend).
