@@ -2,6 +2,10 @@
 
 O resumo das decisões de segurança está no [README](../README.md#decisões-de-segurança). Este documento detalha o rate limit atrás de proxy, o que precisa valer em produção e as limitações conhecidas.
 
+## Como reportar uma vulnerabilidade
+
+Não abra uma issue pública. Use o botão **Report a vulnerability** na aba [Security](https://github.com/MatheusCavalcanteF/api-financas-pessoais/security) do repositório: o relato fica privado entre você e o mantenedor até a correção ser publicada.
+
 ## Rate limit
 
 `POST /auth/login` e `POST /auth/register` têm limite de tentativas por IP:

@@ -1,46 +1,29 @@
-\# Diretrizes do Projeto: API de Finanças Pessoais
+# Diretrizes do projeto: API de Finanças Pessoais
 
+Convenções para quem for contribuir. O frontend tem as próprias em [`frontend/CONTRIBUTING.md`](./frontend/CONTRIBUTING.md).
 
+## Stack
 
-\## Stack Tecnológico
+- Java 25 + Spring Boot 4.1, Maven Wrapper
+- PostgreSQL 16 + Flyway (o esquema é só do Flyway; o Hibernate roda com `ddl-auto: validate`)
+- Spring Data JPA, e JDBC com `ON CONFLICT` na importação em lote
+- Spring Security + JWT (jjwt)
+- Testes: JUnit 5, Mockito e Testcontainers (PostgreSQL real)
+- Documentação: OpenAPI (springdoc), desligada por padrão (`SWAGGER_ENABLED`)
 
-\- Java 25 + Spring Boot 4.1.x
+## Regras de arquitetura e código
 
-\- Gerenciador de dependências: Maven
+- **Pacotes por domínio:** `auth`, `user`, `category`, `transaction`, `report`, `security`, `shared`.
+- **Isolamento de dados:** nenhum endpoint recebe `userId` por payload ou parâmetro. O usuário vem sempre do token (`@AuthenticationPrincipal AuthenticatedUser`).
+- **Posse da entidade:** toda busca, alteração ou exclusão valida o dono na própria query (ex.: `findByIdAndUserId`). Recurso de outro usuário responde 404, igual a um inexistente.
+- **Erros:** `@RestControllerAdvice` + `ProblemDetail` (RFC 7807), sem stacktrace na resposta.
+- **Deduplicação da importação:** hash de data + valor + tipo + descrição normalizada + ocorrência, ou do `FITID` do OFX com a conta. Duplicatas são ignoradas por `UNIQUE (user_id, unique_hash)` + `ON CONFLICT DO NOTHING`.
+- **Listagens:** paginadas com `Pageable`, tamanho máximo de 100.
+- **Entrada:** só por DTOs (records) com Bean Validation; nunca aceitar campos que o usuário não deve controlar (ex.: `role`).
+- **Dependências:** os overrides de versão no `pom.xml` (Tomcat e Jackson) saem quando o Spring Boot trouxer versões iguais ou maiores.
 
-\- Banco de Dados: PostgreSQL
+## Comandos
 
-\- Migrations: Flyway
-
-\- ORM: Spring Data JPA / Hibernate
-
-\- Segurança: Spring Security + JWT
-
-\- Testes: JUnit 5, Mockito, Testcontainers (PostgreSQL)
-
-\- Documentação: OpenAPI (Swagger)
-
-
-
-\## Regras de Arquitetura e Código
-
-\- Padrão de pacotes: Orientado a domínios (ex: `user`, `transaction`, `category`).
-
-\- Isolamento de Dados: NENHUM endpoint deve receber o `userId` via payload ou parâmetro. O usuário atual DEVE ser extraído exclusivamente do `SecurityContext` (token JWT).
-
-\- Todas as queries de busca, atualização ou deleção no JPA devem validar a posse da entidade (ex: `Optional<Transaction> findByIdAndUserId(...)`).
-
-\- Tratamento de Erros: Usar `@RestControllerAdvice` e `ProblemDetail` (RFC 7807) para padronizar respostas de erro.
-
-\- Prevenção de Duplicidade: Transações importadas (CSV/OFX) devem gerar um hash único (data + valor + descrição) salvo no banco para ignorar silenciosamente importações repetidas.
-
-\- Paginação: Todos os endpoints de listagem (`GET /transactions`) devem retornar `Page<T>` usando `Pageable`.
-
-
-
-\## Comandos Úteis
-
-\- Build: `./mvnw clean package -DskipTests` (Windows: `mvnw.cmd`)
-
-\- Testes: `./mvnw test` (requer Docker para o Testcontainers)
-
+- Build: `./mvnw clean package -DskipTests` (Windows: `mvnw.cmd`)
+- Testes: `./mvnw test` (requer Docker para o Testcontainers)
+- CI: `.github/workflows/ci.yml` roda backend, frontend e E2E a cada pull request

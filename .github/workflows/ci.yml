@@ -1,7 +1,6 @@
 # Integração contínua: backend, frontend e E2E em paralelo, a cada push na main e
-# em todo pull request para a main (inclusive os do Dependabot, que antes entravam
-# sem nenhum teste). Versões iguais às de desenvolvimento: Java 25 (pom.xml) e
-# Node.js 24 LTS.
+# em todo pull request para a main (inclusive os do Dependabot). Versões iguais
+# às de desenvolvimento: Java 25 (pom.xml) e Node.js 24 LTS.
 
 name: CI
 
@@ -35,11 +34,6 @@ jobs:
           distribution: temurin
           java-version: "25"
           cache: maven
-
-      # O mvnw está versionado sem permissão de execução (100644). Para corrigir de
-      # vez: git update-index --chmod=+x mvnw, e este passo pode sair.
-      - name: Permissão do Maven Wrapper
-        run: chmod +x mvnw
 
       # Os testes de integração sobem um PostgreSQL descartável via Testcontainers
       # (o runner do GitHub já tem Docker). Não usam o .env: o segredo JWT de teste

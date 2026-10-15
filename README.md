@@ -47,6 +47,7 @@ O navegador nunca fala direto com a API. Os Route Handlers do Next guardam o JWT
 | Proxy do frontend | Só repassa uma lista fixa de recursos e de headers, valida o caminho, não segue redirect e tem timeout. |
 | Headers HTTP | CSP, HSTS (em produção), `X-Frame-Options: DENY`, `X-Content-Type-Options`, `Referrer-Policy` e `Permissions-Policy`. |
 | Dependências | Dependabot semanal para Maven, npm e GitHub Actions. Versões corrigidas de Tomcat e Jackson fixadas no `pom.xml` enquanto o Spring Boot não as traz. |
+| Análise no GitHub | CodeQL em todo push e pull request, secret scanning com push protection e relato privado de vulnerabilidades. O `main` só recebe código por pull request com o CI verde. |
 
 Limitações conhecidas e o detalhamento do rate limit atrás de proxy estão em [`docs/SECURITY.md`](./docs/SECURITY.md).
 
