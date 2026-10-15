@@ -1,4 +1,4 @@
-# financas-frontend
+# Como contribuir: frontend
 
 Frontend de finanças pessoais que consome a API `api-financas-pessoais` (Spring Boot).
 

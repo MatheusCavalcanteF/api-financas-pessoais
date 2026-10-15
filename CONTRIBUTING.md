@@ -1,6 +1,6 @@
-# Diretrizes do projeto: API de Finanças Pessoais
+# Como contribuir: API de Finanças Pessoais
 
-Convenções para quem for contribuir. O frontend tem as próprias em [`frontend/CONTRIBUTING.md`](./frontend/CONTRIBUTING.md).
+Convenções do backend. O frontend tem as próprias em [`frontend/CONTRIBUTING.md`](./frontend/CONTRIBUTING.md).
 
 ## Stack
 

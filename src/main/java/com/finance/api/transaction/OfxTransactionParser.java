@@ -52,14 +52,12 @@ class OfxTransactionParser {
 	private static final Pattern OFX_ROOT = Pattern.compile("<OFX>", Pattern.CASE_INSENSITIVE);
 
 	// O bloco termina no fechamento ou, em SGML malformado, onde começa o próximo
-	private static final Pattern TRANSACTION = Pattern.compile(
-			"<STMTTRN>(.*?)(?=</STMTTRN>|<STMTTRN>|</BANKTRANLIST>|\\z)",
-			Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+	private static final List<String> TRANSACTION_OPEN = List.of("<STMTTRN>");
+	private static final List<String> TRANSACTION_END = List.of("</STMTTRN>", "<STMTTRN>", "</BANKTRANLIST>");
 
 	// Um arquivo pode ter vários extratos: conta corrente (STMTRS) e cartão (CCSTMTRS)
-	private static final Pattern STATEMENT = Pattern.compile(
-			"<(?:CC)?STMTRS>(.*?)(?=</(?:CC)?STMTRS>|<(?:CC)?STMTRS>|\\z)",
-			Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+	private static final List<String> STATEMENT_OPEN = List.of("<STMTRS>", "<CCSTMTRS>");
+	private static final List<String> STATEMENT_END = List.of("</STMTRS>", "</CCSTMTRS>", "<STMTRS>", "<CCSTMTRS>");
 
 	private static final Pattern TRANSACTION_LIST = Pattern.compile("<BANKTRANLIST>", Pattern.CASE_INSENSITIVE);
 
@@ -109,13 +107,11 @@ class OfxTransactionParser {
 
 	private static List<RawTransaction> rawTransactions(String content) {
 		List<RawTransaction> raw = new ArrayList<>();
-		Matcher statements = STATEMENT.matcher(content);
-		boolean anyStatement = false;
-		while (statements.find()) {
-			anyStatement = true;
-			collect(statements.group(1), accountId(statements.group(1)), raw);
+		List<String> statements = OfxBlocks.extract(content, STATEMENT_OPEN, STATEMENT_END);
+		for (String statement : statements) {
+			collect(statement, accountId(statement), raw);
 		}
-		if (!anyStatement) {
+		if (statements.isEmpty()) {
 			// OFX truncado ou fora do padrão: sem extrato, não há conta para o FITID
 			collect(content, null, raw);
 		}
@@ -123,13 +119,12 @@ class OfxTransactionParser {
 	}
 
 	private static void collect(String statement, String accountId, List<RawTransaction> raw) {
-		Matcher matcher = TRANSACTION.matcher(statement);
-		while (matcher.find()) {
+		for (String block : OfxBlocks.extract(statement, TRANSACTION_OPEN, TRANSACTION_END)) {
 			if (raw.size() == CsvTransactionParser.MAX_ROWS) {
 				throw new InvalidImportFileException(
 						"O arquivo excede o limite de " + CsvTransactionParser.MAX_ROWS + " transações");
 			}
-			raw.add(new RawTransaction(matcher.group(1), accountId));
+			raw.add(new RawTransaction(block, accountId));
 		}
 	}
 
