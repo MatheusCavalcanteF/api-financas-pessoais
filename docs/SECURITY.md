@@ -45,6 +45,14 @@ Também em produção:
 - Sirva o app só por HTTPS. O frontend envia HSTS e marca o cookie de sessão como `Secure` quando roda em produção.
 - Deixe `SWAGGER_ENABLED` ausente ou `false`.
 
+## CSRF
+
+A API desabilita a proteção CSRF do Spring Security (`SecurityConfig`) de propósito. Ela é stateless: a autenticação vem do JWT no header `Authorization: Bearer` (`JwtAuthenticationFilter`), a sessão é `STATELESS` e a API não lê nenhum cookie. O navegador não anexa esse header sozinho em requisições de outro site, então não há credencial ambiente que um site de terceiros consiga reaproveitar. Por isso o scanner de código aponta `java/spring-disabled-csrf-protection` como falso positivo.
+
+O cookie de sessão existe só no frontend (`HttpOnly`, `SameSite=Strict`), e é lá que a defesa contra CSRF fica: todo `/api/*` do Next recusa `Sec-Fetch-Site: cross-site` e exige `Origin` igual a `APP_ORIGIN` fora de GET/HEAD.
+
+Se a API passar a aceitar autenticação por cookie, a proteção CSRF dela precisa ser reativada.
+
 ## Limitações conhecidas
 
 - **Logout não revoga o token.** A API é stateless: o logout apaga o cookie, mas um token copiado antes continua valendo até expirar (2h por padrão, `JWT_EXPIRATION`).
